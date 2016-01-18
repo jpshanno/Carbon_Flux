@@ -27,8 +27,11 @@ shinyUI(
       
       conditionalPanel("output.fileUploaded == true",
                        h4("Select an Input File"),
-                       p("At this time the file must be a *.csv file"),
-                       fileInput(inputId = "inputFileGas",
+                       p("Select a CSV file to upload"),
+                       fileInput(inputId = "inputCSV",
+                                 label = NULL),
+                       p("Or select a PP Systems *.dat file"),
+                       fileInput(inputId = "inputTSV",
                                  label = NULL)
       ),
       
@@ -38,7 +41,7 @@ shinyUI(
         h4("Time"),
         p("Select the column that contains your time steps"),
         
-        selectizeInput(inputId = "inputX",
+        selectizeInput(inputId = "X",
                        label = NULL,
                        choices = NULL,
                        multiple = F),
@@ -46,7 +49,7 @@ shinyUI(
         h4("Concentrations"),
         p("Select the column that contains gas concentration"),
         
-        selectizeInput(inputId = "inputY",
+        selectizeInput(inputId = "Y",
                        label = NULL,
                        choices = NULL,
                        multiple = F),
@@ -54,7 +57,7 @@ shinyUI(
         h4("Unique ID"),
         p("Select one or more columns that represent a unique ID for each sample location and event"),
         
-        selectizeInput(inputId = "inputUniqueID",
+        selectizeInput(inputId = "UniqueID",
                        label = NULL,
                        choices = NULL,
                        multiple = T)
@@ -65,19 +68,24 @@ shinyUI(
     mainPanel(
       width = 9,
       tabsetPanel(
-        tabPanel("Data Selection",
-                 conditionalPanel("output.idSelected == true",
-                                  style = "padding-top:1%; margin-right:auto; margin-left:auto",
-                                  # verbatimTextOutput("test"),
-                                  p("Clicking 'Previous' or 'Next' will cause mark the selected probe as editted"),
-                                  uiOutput("idSelection")
-                 ),
-                 conditionalPanel("output.variablesSelected == true",
-                                  fluidRow(
-                                    column(8, plotOutput("plotConc")),
-                                    column(4, dataTableOutput("plottedData"))
-                                  )
+        tabPanel("Data Selection", style = "padding-top:1%; margin-right:auto; margin-left:auto",
+                 # verbatimTextOutput("test"),
+                 uiOutput("idSelection"),
+                 fluidRow(
+                   column(8, plotOutput("plotConc",
+                                        click = "plot_click",
+                                        dblclick = "plot_dblclick",
+                                        hover = "plot_hover",
+                                        brush = brushOpts(id = "plot_brush",
+                                                  delay = 4000,
+                                                  delayType = "debounce",
+                                                  resetOnNew = TRUE
+                                                  )
+                                        )
+                          ),
+                   column(4, dataTableOutput("plottedData"))
                  )
+                 
         ),
         tabPanel("Uploaded Dataset",
                  dataTableOutput("uploadedData")
@@ -85,8 +93,14 @@ shinyUI(
         tabPanel("Processed Samples Only",
                  dataTableOutput("edittedData")
         ),
-        tabPanel("Full Dataset",
-                 dataTableOutput("outputData"))
+        tabPanel("Output Dataset",
+                 dataTableOutput("outputData")
+        ),
+        tabPanel("Regression Output",
+                 dataTableOutput("regressionData")
+        ),
+        tabPanel("Processed Plots",
+                 uiOutput("plots"))
       )
     )
   )
