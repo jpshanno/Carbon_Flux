@@ -17,22 +17,21 @@ library(tidyr)
 # Define UI for application that draws a histogram
 shinyUI(
   fluidPage(
-    includeCSS("https://bootswatch.com/yeti/bootstrap.css"),
+    includeCSS("http://bootswatch.com/yeti/bootstrap.css"),
     # Header -------
     titlePanel(title = "Raw Efflux Processing"),
     
     # Sidebar ------
     sidebarPanel(
-      width = 3,
+      width = 2,
       
       conditionalPanel("output.fileUploaded == true",
                        h4("Select an Input File"),
-                       p("Select a CSV file to upload"),
-                       fileInput(inputId = "inputCSV",
-                                 label = NULL),
-                       p("Or select a PP Systems *.dat file"),
-                       fileInput(inputId = "inputTSV",
-                                 label = NULL)
+                       p("Select a CSV or PP systems *.dat file to upload"),
+                       fileInput(inputId = "File",
+                                 label = NULL,
+                                 accept = c('.csv',
+                                            '.dat'))
       ),
       
       conditionalPanel(
@@ -65,31 +64,41 @@ shinyUI(
     ),
     
     # Main Panel -----
-    mainPanel(
-      width = 9,
+    mainPanel(align = "center",
+      width = 10,
       tabsetPanel(
-        tabPanel("Data Selection", style = "padding-top:1%; margin-right:auto; margin-left:auto",
+        tabPanel("Data Selection", style = "padding-top:5%; margin-right:auto; margin-left:auto",
                  # verbatimTextOutput("test"),
-                 uiOutput("idSelection"),
+                 # verbatimTextOutput("test2"),
+                 # 
                  fluidRow(
-                   column(8, plotOutput("plotConc",
-                                        click = "plot_click",
-                                        dblclick = "plot_dblclick",
-                                        hover = "plot_hover",
-                                        brush = brushOpts(id = "plot_brush",
-                                                  delay = 4000,
-                                                  delayType = "debounce",
-                                                  resetOnNew = TRUE
-                                                  )
-                                        )
-                          ),
-                   column(4, dataTableOutput("plottedData"))
+                   column(4,
+                          # h3("Instructions", align = "left"),
+                          uiOutput("instructions", align = "left"),
+                          uiOutput("idSelection"),
+                          br(),
+                          uiOutput("downloadbutton", width = "100%")
+                          
+                   ),
+                   column(8,
+                          plotOutput("plotConc",
+                                     click = "plot_click",
+                                     dblclick = "plot_dblclick",
+                                     hover = "plot_hover",
+                                     brush = brushOpts(id = "plot_brush",
+                                                       delay = 4000,
+                                                       delayType = "debounce",
+                                                       resetOnNew = TRUE
+                                     ),
+                                     height = "100%"
+                          )
+                          # dataTableOutput("plottedData")
+                          )
                  )
-                 
         ),
-        tabPanel("Uploaded Dataset",
-                 dataTableOutput("uploadedData")
-        ),
+        # tabPanel("Uploaded Dataset",
+        #          dataTableOutput("uploadedData")
+        # ),
         tabPanel("Processed Samples Only",
                  dataTableOutput("edittedData")
         ),
@@ -98,9 +107,7 @@ shinyUI(
         ),
         tabPanel("Regression Output",
                  dataTableOutput("regressionData")
-        ),
-        tabPanel("Processed Plots",
-                 uiOutput("plots"))
+        )
       )
     )
   )

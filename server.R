@@ -12,39 +12,58 @@
 library(shiny)
 # library(lazyeval)
 library(ggplot2)
+library(Cairo)
+options(DT.options = list(pageLength = 50))
 
 
 shinyServer(function(input, output, session) {
   
+  
+  
   # Reactives ---------------------------------------------------------------
   
   Data <- reactive({
-    inFile <- input$inputCSV
+    inFile <- input$File
     
-    if (is.null(inFile)){
-      
-      inFile <- input$inputTSV
-    
-      if (is.null(inFile))
+    if (is.null(inFile))
       return(NULL)
-      
+    
+    filename <- as.character(inFile$name)
+    extension <- substr(filename, nchar(filename)-3, nchar(filename))
+    
+    # if (!(extension %in% c(".dat", ".csv"))){
+    #   session$sendCustomMessage(message = list("Please select a *.csv or *.dat file"))
+    #   return(NULL)
+    # }
+    
+    if(extension == ".dat"){
       read_tsv(inFile$datapath, skip = 2) %>% 
         filter(row_number() != nrow(.))
-      
-      } else {
-        read_csv(inFile$datapath)
-      }
+    } else {
+      read_csv(inFile$datapath)
+    }
+    
   })
   
   PlotData <- reactive({
-    if(input$UniqueID == "" || is.null(input$UniqueID)) {
+    
+    
+    if(displayConditions$idNotSelected) {
       Data <-  
         Data()
     } else {
       Data <- 
         workingValues$workingData %>% 
-        filter(sampleID == input$ID) %>% 
-        .[workingValues$keeprows,]}
+        filter(sampleID == input$ID)
+    }
+    
+    
+    if(displayConditions$idNotSelected){
+      plottingData <- Data
+    } else {
+      plottingData <- Data[workingValues$keeprows[[input$ID]],]
+    }
+    
     
     Model <- 
       lm(get(input$Y) ~ get(input$X), data = Data)
@@ -52,7 +71,7 @@ shinyServer(function(input, output, session) {
     Plot <- 
       ggplot(aes(x = get(input$X),
                  y = get(input$Y)),
-             data = Data) +
+             data =  plottingData) +
       xlab(input$X) +
       ylab(input$Y) +
       geom_point(color = "darkgray") +
@@ -75,9 +94,10 @@ shinyServer(function(input, output, session) {
                    allIDs = list(),
                    sampledIDs = list(),
                    outputData = NULL,
-                   keeprows = logical(),
-                   fittedEfllux = tbl_df(data.frame(
+                   keeprows = list(),
+                   fittedEfflux = tbl_df(data.frame(
                      sampleID = character(), 
+                     nPointsUsed = numeric(),
                      intercept = numeric(), 
                      slope = numeric(), 
                      adjustedRSquared = numeric(), 
@@ -86,9 +106,11 @@ shinyServer(function(input, output, session) {
                      fStatistic = numeric())),
                    processedPlots = list())
   
-  # displayConditions <- 
-  #   reactiveValues(idSelected = input$UniqueID == "" || is.null(input$UniqueID))
-  # 
+  displayConditions <-
+    reactiveValues(
+      idNotSelected = TRUE,
+      variablesNotSelected = TRUE)
+
   # Output Variables --------------------------------------------------------
   
   output$fileUploaded <- reactive({
@@ -101,6 +123,9 @@ shinyServer(function(input, output, session) {
     return(check)
   })
   
+  output$showPlot <- reactive({
+    return(!displayConditions$variablesNotSelected)
+  })
   
   # output$idSelected <- reactive({
   #   return(input$UniqueID == "" || is.null(input$UniqueID))
@@ -125,9 +150,28 @@ shinyServer(function(input, output, session) {
                                      names(Data())))
   })
   
+  
+  observe({
+    if(!is.null(input$X) && 
+       !is.null(input$Y) && 
+       input$X != "" && 
+       input$Y != ""){
+      displayConditions$variablesNotSelected <- FALSE
+    } else {
+        displayConditions$variablesNotSelected <- TRUE
+      }
+    
+    if(!is.null(input$UniqueID) && 
+       input$UniqueID != ""){
+      displayConditions$idNotSelected <- FALSE
+    } else {
+        displayConditions$idNotSelected <- TRUE
+    }
+  })
+  
   observeEvent(input$ID,{
     
-    if(length(input$UniqueID) == 0){NULL}
+    if(displayConditions$idNotSelected){NULL}
     
     updateSelectizeInput(session,
                          inputId = "ID",
@@ -144,9 +188,11 @@ shinyServer(function(input, output, session) {
     workingValues$processedPlots[[input$ID]] <- PlotData()$Plot
       
     workingValues$fittedEfflux <- 
-      bind_rows(workingValues$fittedEfflux,
+      bind_rows(workingValues$fittedEfflux %>% 
+                  filter(sampleID != input$ID),
                 data.frame(
                   sampleID = input$ID, 
+                  nPointsUsed = nrow(PlotData()$Data[workingValues$keeprows[[input$ID]],]),
                   intercept = coef(PlotData()$Model)[2], 
                   slope = coef(PlotData()$Model)[1], 
                   adjustedRSquared = summary(PlotData()$Model)$adj.r.squared, 
@@ -154,12 +200,13 @@ shinyServer(function(input, output, session) {
                   degreesFreedom = summary(PlotData()$Model)$fstatistic[3], 
                   fStatistic = summary(PlotData()$Model)$fstatistic[1]))
     
-    # workingValues$outputData <- 
-    #   bind_rows(
-    #   workingValues$workingData %>% 
-    #     filter(sampleID == input$ID),
-    #   workingValues$outputData
-    # )
+    
+    workingValues$outputData <-
+      bind_rows(
+      workingValues$outputData %>%
+        filter(sampleID != input$ID),
+      PlotData()$Data[workingValues$keeprows[[input$ID]],]) %>% 
+      arrange_("sampleID")
     
     updateSelectizeInput(session,
                          inputId = "ID",
@@ -173,74 +220,104 @@ shinyServer(function(input, output, session) {
                          inputId = "ID",
                          selected = workingValues$allIDs[IndexID() - 1])})
   
+  
   observeEvent(input$undoEdit,{
     
     workingValues$sampledIDs[[input$ID]] <- NULL
     
-    workingValues$keeprows <-  rep(TRUE, nrow(workingValues$workingData))
+    workingValues$keeprows[[input$ID]] <- rep(TRUE, 
+                                              nrow(
+                                                filter(
+                                                  workingValues$workingData, 
+                                                  sampleID == input$ID)))
     
     workingValues$processedPlot[[input$ID]] <- NULL
     
-    workingValues$fittedEfflux <- 
-      workingValues$fittedEfflux %>% 
-      filter(sampleID != input$ID)
+    if(!is.null(workingValues$fittedEfflux)) {
+      workingValues$fittedEfflux <- 
+        workingValues$fittedEfflux %>% 
+        filter(sampleID != input$ID)}
     
-    # workingvalues$outputData <- 
-    #   bind_rows(
-    #     workingValues$workingData %>% 
-    #       filter(sampleID == input$ID),
-    #     workingValues$outputData %>% 
-    #       filter(sampleID != input$ID))
+    workingValues$outputData <-
+      bind_rows(
+        workingValues$workingData %>%
+          filter(sampleID == input$ID),
+        workingValues$outputData %>%
+          filter(sampleID != input$ID)) %>% 
+      arrange_("sampleID")
   })
   
+  
   observeEvent(
-      input$UniqueID,{
+    input$UniqueID,{
+        
+        if(displayConditions$idNotSelected){
+          workingValues$workingData = NULL
+          workingValues$allIDs = list()
+          workingValues$sampledIDs = list()
+          workingValues$keeprows = list()
+          workingValues$outputData = NULL
+          workingValues$fittedEfflux = tbl_df(data.frame(
+            sampleID = character(), 
+            nPointsUsed = numeric(),
+            intercept = numeric(), 
+            slope = numeric(), 
+            adjustedRSquared = numeric(), 
+            residualStandardError = numeric(), 
+            degreesFreedom = numeric(), 
+            fStatistic = numeric()))
+          workingValues$processedPlots = list()
+        }
+        
         workingValues$workingData <-
           Data() %>%
           unite_("sampleID", unlist(input$UniqueID), sep = "_") %>% 
-          arrange_("sampleID", input$X)
+          arrange_("sampleID")
 
         workingValues$allIDs <-
           workingValues$workingData %>%
           distinct(sampleID) %>%
           arrange(sampleID) %>% 
           .$sampleID 
-          
+
         workingValues$outputData <- workingValues$workingData
         
-        workingValues$keeprows <-  rep(TRUE, nrow(workingValues$workingData))
+        for(SAMPLE in workingValues$allIDs){
+          workingValues$keeprows[[SAMPLE]] <- rep(TRUE, nrow(filter(workingValues$workingData, sampleID == SAMPLE)))
+        }
+          # rep(TRUE, nrow(filter(workingValues$workingData, sampleID == input$ID)))
       }
     )
   
   
   observeEvent(input$plot_click, {
+    if(displayConditions$idNotSelected) {return(NULL)}
     res <- nearPoints(PlotData()$Data, 
                       input$plot_click,
                       xvar = input$X,
                       yvar = input$Y,
+                      maxpoints = 1,
                       allRows = TRUE)
     
-    workingValues$keeprows <- xor(workingValues$keeprows, res$selected_)
+    workingValues$keeprows[[input$ID]] <- workingValues$keeprows[[input$ID]] & !res$selected_
   })
   
   observeEvent(input$plot_brush, {
+    if(displayConditions$idNotSelected) {return(NULL)}
     res <- brushedPoints(PlotData()$Data,
                          input$plot_brush, 
                          xvar = input$X,
                          yvar = input$Y,
                          allRows = TRUE)
     
-    workingValues$keeprows <- xor(workingValues$keeprows, res$selected_)
+    workingValues$keeprows[[input$ID]] <- workingValues$keeprows[[input$ID]] & !res$selected_
   })
   
   # Renders -----------------------------------------------------------------
   
   output$plotConc <- renderPlot({
     
-    if(is.null(input$X) || 
-       is.null(input$Y) ||
-       input$X == "" ||
-       input$Y == "") {return(NULL)}
+    if(displayConditions$variablesNotSelected) {return(NULL)}
 
     PlotData()$Plot
     
@@ -248,66 +325,141 @@ shinyServer(function(input, output, session) {
   
   output$idSelection <- renderUI({
     if(length(input$UniqueID) == 0) {return(NULL)}
-    p("Clicking 'Previous' or 'Next' will cause mark the selected probe as editted")
-    fluidRow(
-      selectizeInput("ID",
-                     label = NULL,
-                     choices = workingValues$allIDs,
-                     multiple = F),              
-      actionButton("previousID",
-                   label = "Previous"),
-      
-      actionButton("undoEdit",
-                   label = "Reset Probe"),
-      actionButton("nextID",
-                   label = "Save & Next")
+      column(width = 12,
+             fluidRow(
+               actionButton("previousID",
+                            label = "Previous",
+                            width = "30%"),
+               actionButton("undoEdit",
+                            label = "Reset Probe",
+                            width = "30%"),
+               actionButton("nextID",
+                            label = "Save & Next",
+                            width = "30%")
+             ),
+             br(),
+             fluidRow(
+               selectizeInput("ID",
+                              label = NULL,
+                              choices = workingValues$allIDs,
+                              multiple = F)
+               )
+      )
+  })
+  
+  # output$uploadedData <- renderDataTable({
+  #   Data()
+  # })
+  
+  output$plottedData <- renderDataTable({
+    if(displayConditions$variablesNotSelected || displayConditions$idNotSelected) {return(NULL)}
+        PlotData()$Data[workingValues$keeprows[[input$ID]],] %>%
+          select_("sampleID",
+                  paste("`", input$X, "`", sep = ""),
+                  paste("`", input$Y, "`", sep = ""))
+        # options = list(paging = FALSE, searching = FALSE),
+        # rownames = FALSE
+    })
+  
+  output$edittedData <- renderDataTable({
+    if(length(workingValues$sampledIDs) ==0) {return(NULL)}
+    DT::datatable(
+      workingValues$outputData %>% 
+        filter(sampleID %in% workingValues$sampledIDs),
+      rownames = F
     )
   })
   
-  output$uploadedData <- renderDataTable({
-    Data()
-  })
-  
-  output$plottedData <- renderDataTable({
-    if(input$UniqueID == "" || is.null(input$UniqueID)) {return(NULL)}
-    PlotData()$Data
-    # %>% 
-    #   select_("sampleID", 
-    #           paste("`", input$X, "`", sep = ""), 
-    #           paste("`", input$Y, "`", sep = ""))
-  })
-  
-  output$edittedData <- renderDataTable({
-    #if(length(edittedSamples) == 0) {return(NULL)}
-    workingValues$outputData %>% 
-      filter(sampleID %in% workingValues$sampledIDs)
-  })
-  
   output$outputData <- renderDataTable({
-    workingValues$outputData
+    if(length(workingValues$sampledIDs) == 0){
+      DT::datatable(
+        Data(),
+      rownames = F
+      )
+    } else {
+    DT::datatable(
+      workingValues$outputData,
+      rownames = F
+    )
+    }
   })
   
   output$regressionData <- renderDataTable({
-    workingValues$fittedEfflux
+    if(length(workingValues$sampledIDs) ==0) {return(NULL)}
+    DT::datatable(
+      workingValues$fittedEfflux,
+      rownames = F
+    )
     })
   
-  output$plots <- renderUI({
-    selectizeInput("plotID",
-                   label = NULL,
-                   choices = c(unlist(workingValues$sampledIDs)),
-                   multiple = F
-                )
-    plotOutput(workingValues$processedPlots[[input$plotID]])
+  
+  output$downloadbutton <- renderUI({
+    if(length(workingValues$sampledIDs)== 0) {return(NULL)}
+    downloadButton("download",
+                   label = "Download all data and plots")
   })
   
-  output$test <- renderPrint(workingValues$processedPlots)
+  output$download <-
+    downloadHandler(
+      filename = "Processed_Data.zip",
+      content = function(file){
+        write_csv(workingValues$outputData %>% 
+                    filter(sampleID %in% workingValues$sampledIDs),
+                  "Editted_Samples.csv")
+        write_csv(workingValues$outputData, "All_Samples.csv")
+        write_csv(workingValues$fittedEfflux, "Model_Fits.csv")
+        write_csv(workingValues$fittedEfflux %>% 
+                    select(sampleID, slope) %>% 
+                    rename_("Efflux (ppm)" = "slope"),
+                  "Efflux_Summary.csv")
+        
+        plots <- list()
+        for(i in workingValues$sampledIDs){
+          plots[[i]] <- paste("Plots/", i, ".jpeg", sep = "")
+          ggsave(workingValues$processedPlots[[i]], filename = plots[[i]])
+        }
+        
+        zip(file, files = c("All_Samples.csv", 
+                    "Editted_Samples.csv", 
+                    "Efflux_Summary.csv", 
+                    "Model_Fits.csv",
+                    unlist(plots)
+                    ))
+      }
+    )
   
+  output$instructions <- renderUI({
+    
+    if (is.null(Data())) {
+      
+       p("Please select either a raw *.dat file from a PP Systems EGM infrared gas analyzer or a *.csv. If selecting a *.csv please be sure your file contains one or more column that can be used as a unique sample ID.")
+      
+    } else {
+      if (!displayConditions$idNotSelected & !displayConditions$variablesNotSelected) {
+        # renderOutput({
+          p("Select points to remove from the data by clicking on them. Remove multiple points by clicking and dragging a box around the points you wish to remove")
+        # })
+      } else{
+        # renderOutput({
+          p("Please select your time and concentration variables then select the unique identifier column(s) for your data")
+        # })
+      }
+    }
+  })
   
+  # output$test <- renderPrint({
+  #  PlotData()$Data[workingValues$keeprows[[input$ID]],]
+  # })
+  # # # 
+  # output$test2 <- renderPrint({
+  #   extension
+  # })
+
   # Output Options ----------------------------------------------------------
   
   # outputOptions(output, 'idSelected', suspendWhenHidden = F)
   outputOptions(output, 'variablesSelected', suspendWhenHidden = F)
   outputOptions(output, 'fileUploaded', suspendWhenHidden = F)
   outputOptions(output, "plotConc", suspendWhenHidden = F)
-  
+  outputOptions(output, "showPlot", suspendWhenHidden = F)
 })
