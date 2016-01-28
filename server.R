@@ -48,6 +48,11 @@ shinyServer(function(input, output, session) {
     Data <- 
       data$plotting
     
+    xCoord <- min(Data[[input$X]], na.rm = T)
+    yDiff <- max(Data[[input$Y]], na.rm = T) - min(Data[[input$Y]], na.rm = T)
+    yCoord <- max(Data[[input$Y]], na.rm = T) - 0.05*yDiff
+    
+    
     # Fit basic linear model with only unselected rows
     if(nrow(data$plotting) == 0){
       Model <- NULL
@@ -57,16 +62,27 @@ shinyServer(function(input, output, session) {
     # Build plots with points and model
     if(nrow(data$plotting) != 0){
       Plot <- 
-        ggplot(data =  Data) +
+        ggplot(data = Data,
+               aes(x = get(input$X),
+                   y = get(input$Y))) +
         xlab(input$X) +
         ylab(input$Y) +
-        geom_point(aes(x = get(input$X),
-                       y = get(input$Y)),
-                   color = "darkgray") +
+        geom_point(color = "darkgray") +
         geom_abline(slope = coef(Model)[2],
                     intercept = coef(Model)[1],
                     color = "black") +
+        annotate("text", 
+                 label = paste("Slope =", 
+                               round(coef(Model)[2],2), 
+                               sep = " "), 
+                 x = xCoord, 
+                 y = yCoord, 
+                 hjust = "inward") +
         theme_bw()
+      if(input$zeroLimit == T){
+        upperY <- ggplot_build(Plot)$panel$ranges[[1]]$y.range[2]
+        Plot <- Plot + coord_cartesian(ylim = c(0, upperY))
+      }
     } else {
       Plot <- 
         ggplot(aes(x = get(input$X),
@@ -189,7 +205,7 @@ shinyServer(function(input, output, session) {
   
   # Set working values when ID is selcted
   observe({
-    if(!displayConditions$idNotSelected){
+    if(displayConditions$idNotSelected){return(NULL)}
       # Create a unique ID using the columns selected for ID
       data$input <-
         Data() %>%
@@ -207,8 +223,12 @@ shinyServer(function(input, output, session) {
         distinct(sampleID) %>%
         arrange(sampleID) %>% 
         .$sampleID
-      
-      sample$name <- IDs$all[sample$index]
+  })
+  
+  observe({
+    if(displayConditions$idNotSelected){return(NULL)}
+    sample$name <- IDs$all[sample$index]})    
+  
 
       # Generate a list of logical vectors named with each ID. This is used in
       # the plotting to indicate which rows are selected
@@ -219,8 +239,10 @@ shinyServer(function(input, output, session) {
       #           filter(
       #             workingValues$workingData, sampleID == SAMPLE)))
       # }
-      
-      if(length(IDs$processed) != 0 && sample$name %in% IDs$processed){
+
+  observe({
+    if(displayConditions$idNotSelected){return(NULL)}
+      if(sample$name %in% IDs$processed){
         data$plotting <- 
           data$editted %>% 
           filter(sampleID == sample$name)
@@ -229,8 +251,6 @@ shinyServer(function(input, output, session) {
           data$input %>% 
           filter(sampleID == sample$name)
       }
-      
-    }
   })
 
   
@@ -300,7 +320,7 @@ shinyServer(function(input, output, session) {
     
     data$editted <- 
       bind_rows(
-        filter(data$input, sampleID != sample$name),
+        filter(data$editted, sampleID != sample$name),
         data$plotting) %>% 
       arrange(sampleID)
     

@@ -81,7 +81,9 @@ shinyUI(
                        label = NULL,
                        choices = NULL,
                        multiple = F),
-        
+        checkboxInput("zeroLimit",
+                      label = "Set lower y-axis limit to zero?",
+                      value = FALSE),
         h4("Unique ID"),
         p("Select one or more columns that represent a unique ID for each sample location and event"),
         selectizeInput(inputId = "UniqueID",
@@ -131,6 +133,7 @@ shinyUI(
                    # Display the appropriate set up instructions
                    column(4,
                           # verbatimTextOutput("test"),
+                          # verbatimTextOutput("test2"),
                           uiOutput("instructions", align = "left"),
                           
                           br(),
