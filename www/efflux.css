@@ -69,6 +69,7 @@ dfn {
 }
 h1 {
   font-size: 2em;
+  line-height: 25%;
   margin: 0.67em 0;
 }
 mark {
@@ -1270,10 +1271,12 @@ h6 .small,
 h1,
 .h1 {
   font-size: 39px;
+  line-height: 25%
 }
 h2,
 .h2 {
   font-size: 32px;
+  line-height: 50%;
 }
 h3,
 .h3 {
@@ -3006,6 +3009,27 @@ select[multiple].input-lg {
     font-size: 13px;
   }
 }
+
+.btn-file {
+    position: relative;
+    overflow: hidden;
+}
+.btn-file input[type=file] {
+    position: absolute;
+    top: 0;
+    right: 0;
+    min-width: 100%;
+    min-height: 100%;
+    font-size: 100px;
+    text-align: right;
+    filter: alpha(opacity=0);
+    opacity: 0;
+    outline: none;
+    background: white;
+    cursor: inherit;
+    display: block;
+}
+
 .btn {
   display: inline-block;
   margin-bottom: 0;
