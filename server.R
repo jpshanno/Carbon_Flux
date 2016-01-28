@@ -18,11 +18,18 @@ shinyServer(function(input, output, session) {
   
   # Load selected file
   Data <- reactive({
-      inFile <- input$File
+    
+    inFile <- input$File
       
-      if (is.null(inFile))
-        return(NULL)
+      if(input$csvExample > 0) {
+        return(read_csv("./www/examples/Multi-Column_ID.csv"))}
+      if(input$datExample > 0) {
+        return(read_tsv("./www/examples/EGM4_Output.dat", skip = 2) %>% 
+                 filter(row_number() != nrow(.)))}
       
+      if (is.null(inFile)){
+        return(NULL)}
+
       filename <- as.character(inFile$name)
       extension <- substr(filename, nchar(filename)-3, nchar(filename))
       
@@ -38,79 +45,106 @@ shinyServer(function(input, output, session) {
   # only the selected sample, fits a model, and creates a plot. The data, model,
   # and plot are all returned.
   PlotData <- reactive({
-      # If no ID variable has been selected display the plot with all the data
-      if(displayConditions$idNotSelected) {
-        Data <-  
-          Data()
-      } else {
-        Data <- 
-          workingValues$workingData %>% 
-          filter(sampleID == input$ID)
-      }
-      
-      # If an ID has been selected create a trimmed dataset removing selected data
-      # points. This can probably be combined with the If statement above
-      if(displayConditions$idNotSelected){
-        plottingData <- Data
-      } else {
-        plottingData <- Data[workingValues$keepRows[[input$ID]],]
-      }
+    Data <- 
+      data$plotting
     
-      # Fit basic linear model with only unselected rows
-      Model <- 
-        lm(get(input$Y) ~ get(input$X), data = plottingData)
+    # Fit basic linear model with only unselected rows
+    if(nrow(data$plotting) == 0){
+      Model <- NULL
+    } else {
+      Model <- lm(get(input$Y) ~ get(input$X), data = Data)}
     
-      # Build plots with points and model
+    # Build plots with points and model
+    if(nrow(data$plotting) != 0){
+      Plot <- 
+        ggplot(data =  Data) +
+        xlab(input$X) +
+        ylab(input$Y) +
+        geom_point(aes(x = get(input$X),
+                       y = get(input$Y)),
+                   color = "darkgray") +
+        geom_abline(slope = coef(Model)[2],
+                    intercept = coef(Model)[1],
+                    color = "black") +
+        theme_bw()
+    } else {
       Plot <- 
         ggplot(aes(x = get(input$X),
                    y = get(input$Y)),
-               data =  plottingData) +
+               data =  Data) +
         xlab(input$X) +
         ylab(input$Y) +
-        geom_point(color = "darkgray") +
-        geom_abline(slope = coef(Model)[2],
-                    intercept = coef(Model[1]),
-                    color = "black") +
-        theme_bw()
+        geom_blank()
+    }
     
-      # Return all function values
-      info <- list(Model = Model, 
-                   Data = Data, 
-                   Plot = Plot)
-      return(info)
+    # Return all function values
+    info <- list(Model = Model, 
+                 Data = Data, 
+                 Plot = Plot)
+    return(info)
   })
   
   # Translate the selected ID to an index number of the available IDs for subsetting
-  IndexID <- reactive(grep(input$ID, workingValues$allIDs))
+  # IndexID <- reactive(grep(input$ID, workingValues$allIDs))
     
   
 
 # Reactive Values ---------------------------------------------------------
 # Create value that can be updated and used on the server
-  
-  workingValues <- 
-    reactiveValues(workingData = NULL,
-                   allIDs = list(),
-                   sampledIDs = list(),
-                   outputData = NULL,
-                   keepRows = list(),
-                   fittedEfflux = tbl_df(data.frame(
-                     sampleID = character(), 
-                     nPointsUsed = numeric(),
-                     intercept = numeric(), 
-                     slope = numeric(), 
-                     adjustedRSquared = numeric(), 
-                     residualStandardError = numeric(), 
-                     degreesFreedom = numeric(), 
-                     fStatistic = numeric())),
-                   processedPlots = list())
+  # 
+  # workingValues <- 
+  #   reactiveValues(workingData = NULL,
+  #                  allIDs = list(),
+  #                  sampledIDs = list(),
+  #                  outputData = NULL,
+  #                  keepRows = list(),
+  #                  fittedEfflux = tbl_df(data.frame(
+  #                    sampleID = character(), 
+  #                    nPointsUsed = numeric(),
+  #                    intercept = numeric(), 
+  #                    slope = numeric(), 
+  #                    adjustedRSquared = numeric(), 
+  #                    residualStandardError = numeric(), 
+  #                    degreesFreedom = numeric(), 
+  #                    fStatistic = numeric())),
+  #                  processedPlots = list())
   
   displayConditions <-
     reactiveValues(
       idNotSelected = TRUE,
       variablesNotSelected = TRUE)
 
+  data <- reactiveValues(
+    input = NULL,
 
+    editted = NULL,
+      
+    plotting = 
+      NULL,
+    regressionInfo = 
+      tbl_df(data.frame(
+        sampleID = character(), 
+        nPointsUsed = numeric(),
+        intercept = numeric(), 
+        slope = numeric(), 
+        adjustedRSquared = numeric(), 
+        residualStandardError = numeric(), 
+        degreesFreedom = numeric(), 
+        fStatistic = numeric())),
+    plots =
+      list()
+  )
+  
+  
+  IDs <- reactiveValues(
+    all = character(),
+    processed = list()
+  ) 
+  
+  sample <- reactiveValues(
+    index = 1,
+    name = character()
+  )
   
 
 # General Observers ------
@@ -153,183 +187,164 @@ shinyServer(function(input, output, session) {
   })
 
   
+  # Set working values when ID is selcted
+  observe({
+    if(!displayConditions$idNotSelected){
+      # Create a unique ID using the columns selected for ID
+      data$input <-
+        Data() %>%
+        unite_("sampleID", unlist(input$UniqueID), sep = "_") %>% 
+        arrange_("sampleID")
+      
+      data$editted <-
+        Data() %>%
+        unite_("sampleID", unlist(input$UniqueID), sep = "_") %>% 
+        arrange_("sampleID")
+      
+      # Generate a string of all the sample IDs
+      IDs$all <- 
+        data$input  %>%
+        distinct(sampleID) %>%
+        arrange(sampleID) %>% 
+        .$sampleID
+      
+      sample$name <- IDs$all[sample$index]
+
+      # Generate a list of logical vectors named with each ID. This is used in
+      # the plotting to indicate which rows are selected
+      # for(SAMPLE in workingValues$allIDs){
+      #   workingValues$keepRows[[SAMPLE]] <- 
+      #     rep(TRUE, 
+      #         nrow(
+      #           filter(
+      #             workingValues$workingData, sampleID == SAMPLE)))
+      # }
+      
+      if(length(IDs$processed) != 0 && sample$name %in% IDs$processed){
+        data$plotting <- 
+          data$editted %>% 
+          filter(sampleID == sample$name)
+      } else {
+        data$plotting <- 
+          data$input %>% 
+          filter(sampleID == sample$name)
+      }
+      
+    }
+  })
+
+  
 
 # Event Observers -----
   
-  
-  # Run when the ID variable is set
-  observeEvent(input$UniqueID,{
-      # If the ID variable is cleared or not selected reset all values. DOESN'T
-      # CURRENTLY WORK
-      if(displayConditions$idNotSelected){
-        workingValues$workingData = NULL
-        workingValues$allIDs = list()
-        workingValues$sampledIDs = list()
-        workingValues$keepRows = list()
-        workingValues$outputData = NULL
-        workingValues$fittedEfflux = tbl_df(data.frame(
-          sampleID = character(), 
-          nPointsUsed = numeric(),
-          intercept = numeric(), 
-          slope = numeric(), 
-          adjustedRSquared = numeric(), 
-          residualStandardError = numeric(), 
-          degreesFreedom = numeric(), 
-          fStatistic = numeric()))
-        workingValues$processedPlots = list()
-        
-        # Create a unique ID using the columns selected for ID
-        workingValues$workingData <-
-          Data() %>%
-          unite_("sampleID", unlist(input$UniqueID), sep = "_") %>% 
-          arrange_("sampleID")
-        
-        # Generate a string of all the sample IDs
-        workingValues$allIDs <-
-          workingValues$workingData %>%
-          distinct(sampleID) %>%
-          arrange(sampleID) %>% 
-          .$sampleID 
-        
-        # Populate the output dataset with the full uploaded set
-        workingValues$outputData <- workingValues$workingData
-        
-        # Generate a list of logical vectors named with each ID. This is used in
-        # the plotting to indicate which rows are selected
-        for(SAMPLE in workingValues$allIDs){
-          workingValues$keepRows[[SAMPLE]] <- 
-            rep(TRUE, 
-                nrow(
-                  filter(
-                    workingValues$workingData, sampleID == SAMPLE)))
-        }
-      }
-    })
-  
   # Run on click on the plot
   observeEvent(input$plot_click, {
-    if(displayConditions$idNotSelected) {return(NULL)}
-    
-    # Return a data frame of points with a column (selected_) indicating which
-    # point was selected. Max points ensures that only the closest point is
-    # returned
-    res <- nearPoints(PlotData()$Data, 
-                      input$plot_click,
-                      xvar = input$X,
-                      yvar = input$Y,
-                      maxpoints = 1,
-                      allRows = TRUE)
-    
-    # Compare the selected points with the keepRows vector and update keepRows
-    # to be true in both cases
-    workingValues$keepRows[[input$ID]] <- 
-      workingValues$keepRows[[input$ID]] & !res$selected_
+    data$plotting <- anti_join(data$plotting, 
+                               nearPoints(PlotData()$Data, 
+                                          input$plot_click,
+                                          xvar = input$X,
+                                          yvar = input$Y,
+                                          maxpoints = 1))
+    # if(nrow(data$plotting) == 0){sample$index <- sample$index + 1}
   })
   
-  # Run on dragging a box on the plot
+  # Run on dragging a box on the plot Return a data frame of points with a
+  # column (selected_) indicating which point was selected. Max points ensures
+  # that only the closest point is returned
   observeEvent(input$plot_brush, {
-    if(displayConditions$idNotSelected) {return(NULL)}
-    # Return a data frame of points with a column (selected_) indicating which
-    # point was selected. Max points ensures that only the closest point is
-    # returned
-    res <- brushedPoints(PlotData()$Data,
-                         input$plot_brush, 
-                         xvar = input$X,
-                         yvar = input$Y,
-                         allRows = TRUE)
-    
-    # Compare the selected points with the keepRows vector and update keepRows
-    # to be true in both cases
-    workingValues$keepRows[[input$ID]] <- workingValues$keepRows[[input$ID]] & !res$selected_
+    data$plotting <- anti_join(data$plotting, 
+                               brushedPoints(PlotData()$Data,
+                                             input$plot_brush, 
+                                             xvar = input$X,
+                                             yvar = input$Y))
+    # if(nrow(data$plotting) == 0){sample$index <- sample$index + 1}
+  })
+  
+  observeEvent(input$plot_dblclick, {
+                      data$plotting <- 
+                        filter(data$plotting, is.na(sampleID))
   })
   
   # Runs when you press Save & Next
   observeEvent(input$nextID,{
     
     # Add the value in the ID dropdown menu to list of processed samples
-    workingValues$sampledIDs[[input$ID]] <- input$ID
+    IDs$processed[[sample$name]] <- sample$name
     
     # Add the sample plot to a list of generated plots - overwrites the plot as
     # data is selected and removed
-    workingValues$processedPlots[[input$ID]] <- PlotData()$Plot
+    data$plots[[sample$name]] <- PlotData()$Plot
     
     # Extracted values from the model and merge them into a tbl
-    workingValues$fittedEfflux <- 
-      bind_rows(workingValues$fittedEfflux %>% 
-                  filter(sampleID != input$ID),
-                data.frame(
-                  sampleID = 
-                    input$ID, 
-                  nPointsUsed = 
-                    nrow(PlotData()$Data[workingValues$keepRows[[input$ID]],]),
-                  intercept = 
-                    coef(PlotData()$Model)[1], 
-                  slope = 
-                    coef(PlotData()$Model)[2], 
-                  adjustedRSquared = 
-                    summary(PlotData()$Model)$adj.r.squared, 
-                  residualStandardError = 
-                    summary(PlotData()$Model)$sigma, 
-                  degreesFreedom = 
-                    summary(PlotData()$Model)$fstatistic[3], 
-                  fStatistic = 
-                    summary(PlotData()$Model)$fstatistic[1]))
+    if(!is.null(PlotData()$Model)){
+      data$regressionInfo <-
+        bind_rows(data$regressionInfo %>%
+                           filter(sampleID != sample$name),
+                         data.frame(
+                           sampleID =
+                             sample$name,
+                           nPointsUsed =
+                             nrow(PlotData()$Data),
+                           intercept =
+                             coef(PlotData()$Model)[1],
+                           slope =
+                             coef(PlotData()$Model)[2],
+                           adjustedRSquared =
+                             summary(PlotData()$Model)$adj.r.squared,
+                           residualStandardError =
+                             summary(PlotData()$Model)$sigma,
+                           degreesFreedom =
+                             summary(PlotData()$Model)$fstatistic[3],
+                           fStatistic =
+                             summary(PlotData()$Model)$fstatistic[1]))}
     
-    # Update the output dataset to remove selected points
-    workingValues$outputData <-
+    data$editted <- 
       bind_rows(
-      workingValues$outputData %>%
-        filter(sampleID != input$ID),
-      PlotData()$Data[workingValues$keepRows[[input$ID]],]) %>% 
-      arrange_("sampleID")
+        filter(data$input, sampleID != sample$name),
+        data$plotting) %>% 
+      arrange(sampleID)
+    
+    if(sample$index != length(IDs$all)) {sample$index <- sample$index + 1}
     
     # Update the ID dropdown menu to the next sample
     updateSelectizeInput(session,
                          inputId = "ID",
-                         selected = workingValues$allIDs[IndexID() + 1 ])
-    })
+                         selected = sample$name)
+  })
 
   # Runs when you press Reset Probe
   observeEvent(input$undoEdit,{
     
     # Remove the current sample from the list of processed samples
-    workingValues$sampledIDs[[input$ID]] <- NULL
+    IDs$processed[[sample$name]] <- NULL
     
     # Display all points again. keepRows is a logical that indicates with sample
     # points to keep in the data & display
-    workingValues$keepRows[[input$ID]] <- rep(TRUE, 
-                                              nrow(
-                                                filter(
-                                                  workingValues$workingData, 
-                                                  sampleID == input$ID)))
+    data$plotting <- 
+      data$input %>% 
+      filter(sampleID == sample$name)
     
     # Remove the processed plot for the current sample from the list of plots
-    workingValues$processedPlot[[input$ID]] <- NULL
+    data$plots[[sample$name]] <- NULL
     
     # Remove the model information for the current sample
-    if(!is.null(workingValues$fittedEfflux)) {
-      workingValues$fittedEfflux <- 
-        workingValues$fittedEfflux %>% 
-        filter(sampleID != input$ID)}
+    if(nrow(data$regressionInfo)) {
+      data$regressionInfo <- 
+        data$regressionInfo %>% 
+        filter(sampleID != sample$name)}
     
-    # Reset the output dataset to include all of the data points from the
-    # current sample
-    workingValues$outputData <-
-      bind_rows(
-        workingValues$workingData %>%
-          filter(sampleID == input$ID),
-        workingValues$outputData %>%
-          filter(sampleID != input$ID)) %>% 
-      arrange_("sampleID")
+    # Remove the data ponits from the current probe from the editted dataset
+    data$editted <-
+      filter(data$editted, sampleID != sample$name)
   })  
   
   # Runs when you press previous
   observeEvent(input$previousID,{
-    
+    if(sample$index != 1) {sample$index <- sample$index - 1}
     # Update the ID dropdown menu to the previous sample
     updateSelectizeInput(session,
                          inputId = "ID",
-                         selected = workingValues$allIDs[IndexID() - 1])
+                         selected = sample$name)
     })
   
   
@@ -338,10 +353,15 @@ shinyServer(function(input, output, session) {
   
   # Display the name of the selected
   output$filename <- renderUI({
-    HTML(
+    if(!is.null(input$File)){
+    return(HTML(
       paste("<strong>Uploaded File:</strong>",
             basename(input$File$name))
-      )
+    ))}
+    if(input$datExample > 0){
+      return(HTML("<strong>Uploaded File:</strong> EGM-4 Example"))}
+    if(input$csvExample > 0){
+      return(HTML("<strong>Uploaded File:</strong> CSV Example"))}
   })
   
   # Create the plot, do not attempt to run if variables are not set
@@ -360,19 +380,22 @@ shinyServer(function(input, output, session) {
              fluidRow(
                actionButton("previousID",
                             label = "Previous",
-                            width = "30%"),
+                            width = "30%",
+                            class = "btn-info"),
                actionButton("undoEdit",
                             label = "Reset Probe",
-                            width = "30%"),
+                            width = "30%",
+                            class = "btn-info"),
                actionButton("nextID",
                             label = "Save & Next",
-                            width = "30%")
+                            width = "30%",
+                            class = "btn-info")
              ),
              br(),
              fluidRow(
                selectizeInput("ID",
                               label = NULL,
-                              choices = workingValues$allIDs,
+                              choices = IDs$all,
                               multiple = F)
                )
       )
@@ -395,57 +418,38 @@ shinyServer(function(input, output, session) {
   # })
   
   # Generate the table of only editted table
-  output$edittedData <- renderDataTable({
-    
-    # Return nothing if no samples have been processed
-    if(length(workingValues$sampledIDs) ==0) {return(NULL)}
-    
+  output$edittedData <- DT::renderDataTable({
+    if(length(IDs$processed) ==0) {return(NULL)}
     DT::datatable(
-      workingValues$outputData %>% 
-        filter(sampleID %in% workingValues$sampledIDs),
+      data$editted,
       options = list(paging = FALSE, searching = FALSE),
-      rownames = F
-    )
+      rownames = F)
   })
   
   # Generate the table of data that will be downloaded
-  output$outputData <- renderDataTable({
-    # If no samples have been processed return the original data
-    if(length(workingValues$sampledIDs) == 0){
-      DT::datatable(
-        Data(),
-        options = list(paging = FALSE, searching = FALSE),
-        rownames = F
-      )
-    } else {
-      
-      # Otherwise return the merged dataset
-      DT::datatable(
-        workingValues$outputData,
-        options = list(paging = FALSE, searching = FALSE),
-        rownames = F
-      )
-    }
+  output$outputData <- DT::renderDataTable({
+    DT::datatable(
+      bind_rows(filter(data$input, !(sampleID %in% IDs$processed)),
+                       filter(data$editted, sampleID %in% IDs$processed)),
+      options = list(paging = FALSE, searching = FALSE),
+      rownames = F)
   })
 
   #Generate the table of model information
-  output$regressionData <- renderDataTable({
-    
-    # Return nothing if no samples have been processed
-    if(length(workingValues$sampledIDs) ==0) {return(NULL)}
-    
-    DT::datatable(
-      data.frame(workingValues$fittedEfflux),
-      options = list(paging = FALSE, searching = FALSE),
-      rownames = F
-    )
-    })
+  output$regressionData <- DT::renderDataTable({
+    if(length(IDs$processed) ==0) {return(NULL)}
+    # DT::datatable(
+    data$regressionInfo#,
+    # options = list(paging = FALSE, searching = FALSE),
+    # rownames = F)
+  })
   
   # Show the download button after at least 1 sample has been processed
   output$downloadbutton <- renderUI({
-    if(length(workingValues$sampledIDs)== 0) {return(NULL)}
+    if(length(IDs$processed)== 0) {return(NULL)}
       downloadButton("download",
-                     label = "Download all data and plots")
+                     label = "Download all data and plots",
+                     class = "btn-info")
   })
   
   # Download the Data
@@ -455,25 +459,25 @@ shinyServer(function(input, output, session) {
       content = function(file){
         
         # Create CSVs
-        write_csv(workingValues$outputData %>% 
-                    filter(sampleID %in% workingValues$sampledIDs),
+        write_csv(data$editted %>% 
+                    filter(sampleID %in% IDs$processed),
                   "Editted_Samples.csv")
-        write_csv(workingValues$outputData, "All_Samples.csv")
-        write_csv(workingValues$fittedEfflux, "Model_Fits.csv")
-        write_csv(workingValues$fittedEfflux %>% 
+        write_csv(data$editted, "Final_Data.csv")
+        write_csv(data$regressionInfo, "Model_Fits.csv")
+        write_csv(data$regressionInfo %>% 
                     select(sampleID, slope) %>% 
                     rename(`Efflux (ppm)` = slope),
                   "Efflux_Summary.csv")
 
         # Create a list of plots to save
         plots <- list()
-        for(i in workingValues$sampledIDs){
+        for(i in data$plotss){
           plots[[i]] <- paste("Plots/", i, ".jpeg", sep = "")
-          ggsave(workingValues$processedPlots[[i]], filename = plots[[i]])
+          ggsave(data$plots, filename = plots[[i]])
         }
         
         # Place everything in a zip file
-        zip(file, files = c("All_Samples.csv", 
+        zip(file, files = c("Final_Data.csv", 
                     "Editted_Samples.csv", 
                     "Efflux_Summary.csv", 
                     "Model_Fits.csv",
@@ -488,7 +492,9 @@ shinyServer(function(input, output, session) {
     if (is.null(Data())) {
       fluidRow(
              h4("Step 1: File Upload"),
-             p("Please select either a raw *.dat file from a PP Systems EGM infrared gas analyzer or any *.csv. If selecting a *.csv please be sure your file contains one or more column that can be used as a unique sample ID.")
+             p("Please select either a raw *.dat file from a PP Systems EGM infrared gas analyzer or any *.csv. If selecting a *.csv please be sure your file contains one or more column that can be used as a unique sample ID."),
+             br(),
+             p("Two example datasets are available. The first is raw output from a PP Systems EGM-4. The second respresents a full season of sampling where each unique sample is represented by its treatment, collar number, month of sample, and day of sample.")
       )
     } else {
       if (!displayConditions$idNotSelected & !displayConditions$variablesNotSelected) {
@@ -503,7 +509,7 @@ shinyServer(function(input, output, session) {
         fluidRow(
           h4("Step 2: Set Variable & ID Columns"),
           p("If you are working with efflux data select the columns that contains sample time steps and sample concentrations. If you are working with any other data the time variable corresponds to the x-axis and the concentration variable corresponds to the y-axis."),
-          p("Choose one or more columns that separates your data into unique samples.")
+          p("Choose one or more columns that separates your data into unique samples. Changing the ID variables will delete all processed data")
           )
       }
     }
@@ -529,7 +535,7 @@ shinyServer(function(input, output, session) {
 # Testing Tools -----
 
 # output$test <- renderPrint({
-#  input$UniqueID
+#  input$csvExample
 # })
 # # # 
 # output$test2 <- renderPrint({
