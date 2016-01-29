@@ -214,8 +214,8 @@ shinyServer(function(input, output, session) {
       
       data$editted <-
         Data() %>%
-        unite_("sampleID", unlist(input$UniqueID), sep = "_") %>% 
-        arrange_("sampleID")
+        unite_("sampleID", unlist(input$UniqueID), sep = "_") %>%
+        slice(0)
       
       # Generate a string of all the sample IDs
       IDs$all <- 
@@ -479,11 +479,16 @@ shinyServer(function(input, output, session) {
       content = function(file){
         
         # Create CSVs
-        write_csv(data$editted %>% 
+        write_csv(data$editted,
+                  "Processed_Samples.csv")
+        write_csv(data$regressionInfo, 
+                  "Model_Fits.csv")
+        write_csv(anti_join(data$input, data$editted) %>% 
                     filter(sampleID %in% IDs$processed),
-                  "Editted_Samples.csv")
-        write_csv(data$editted, "Final_Data.csv")
-        write_csv(data$regressionInfo, "Model_Fits.csv")
+                  "Removed_Points.csv")
+        write_csv(data$input %>%
+                    filter(!(sampleID %in% IDs$processed)),
+                  "Unprocessed_Samples.csv")
         write_csv(data$regressionInfo %>% 
                     select(sampleID, slope) %>% 
                     rename(`Efflux (ppm)` = slope),
@@ -491,18 +496,20 @@ shinyServer(function(input, output, session) {
 
         # Create a list of plots to save
         plots <- list()
-        for(i in data$plotss){
+        dir.create("Plots")
+        for(i in names(data$plots)){
           plots[[i]] <- paste("Plots/", i, ".jpeg", sep = "")
-          ggsave(data$plots, filename = plots[[i]])
+          ggsave(data$plots[[i]], filename = plots[[i]])
         }
         
         # Place everything in a zip file
-        zip(file, files = c("Final_Data.csv", 
-                    "Editted_Samples.csv", 
-                    "Efflux_Summary.csv", 
-                    "Model_Fits.csv",
-                    unlist(plots)
-                    ))
+        zip(file, files = c("Processed_Samples.csv", 
+                            "Unprocessed_Samples.csv",
+                            "Removed_Points.csv",
+                            "Efflux_Summary.csv", 
+                            "Model_Fits.csv",
+                            unlist(plots)
+        ))
       }
     )
   
@@ -523,7 +530,7 @@ shinyServer(function(input, output, session) {
           p("Select points to remove from the data by clicking on them or remove multiple points by clicking and dragging a box around the points you wish to remove. Please keep in mind that this step is not for removing data you view as 'outliers'. Points should only be removed due to equipment/sampling errors or to remove efflux 'ramp up' at the beginning of sampling."),
           p("After you are finished with a sample press 'Save & Next' to advance to the next sample. This will also save information about the model fit and update the output data, removing the data you selected. You can view any sample using the dropdown mean or return to the previous plot with the 'Previous' button (navigating this way will not save any of your selections). Resetting the probe will delete the saved regression information and add all of the sample points back to your plot and the output data."),
           p("Once you have saved information from at least one plot the updated datset, regression information, and the final plot will all be available for download. I recommend downloading data often to avoid losing work if the app or your browser has a problem."),
-          p("Downloaded data will be a zipped file containing the final plots for each sample and four CSVs.'Editted_Samples.csv' contains only the samples you editted and 'All_Samples.csv' contains your editted samples with uploaded samples you did not edit. 'Efflux_Summary.csv' contains the sample ID and the slope (assumed to be efflux in ppm), futher information about the models can be found in 'Model_Fits.csv'.")
+          p("Downloaded data will be a zipped file containing the final plots for each sample and five CSVs. 'Processed_Samples.csv' and 'Unprocessed_Samples.csv' contain the samples you viewed and saved and the samples that were not saved, respecitvely. 'Removed_Points.csv' contains all of the data points that you removed. 'Efflux_Summary.csv' contains the sample ID and the slope (assumed to be efflux in ppm), futher information about the models can be found in 'Model_Fits.csv'.")
         )
       } else{
         fluidRow(
